@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
+from .auto_seed import suggest_moving_object_seed
 from .extraction import SeededColorTracker, TrackingConfig
 from .models import Trajectory
 from .sam2_extraction import SAM2DepthConfig, SAM2DepthTrajectoryExtractor
@@ -36,6 +37,14 @@ def _sam2_config(args) -> SAM2DepthConfig:
 
 
 def _point_maps(args) -> tuple[dict[int, list[tuple[float, float]]], dict[int, list[tuple[float, float]]]]:
+    if getattr(args, "auto_seed", False):
+        result = suggest_moving_object_seed(args.source, preview_path=args.seed_preview)
+        print(json.dumps({
+            "auto_seed": {"object_id": 1, "x": result.x, "y": result.y,
+                          "area": result.area, "confidence": result.confidence},
+            "preview": args.seed_preview,
+        }, indent=2, ensure_ascii=False))
+        return {1: [(result.x, result.y)]}, {}
     positives: dict[int, list[tuple[float, float]]] = {}
     negatives: dict[int, list[tuple[float, float]]] = {}
     for raw in args.seed:
@@ -60,11 +69,22 @@ def _parser() -> argparse.ArgumentParser:
     extract.add_argument("--output", required=True)
     extract.add_argument("--overlay-dir")
 
+    suggest = sub.add_parser(
+        "suggest-seed", help="estimate a first-frame click for one moving object"
+    )
+    suggest.add_argument("source")
+    suggest.add_argument("--preview", default="auto_seed_preview.jpg")
+
     sam_extract = sub.add_parser("extract-sam2", help="video/frames -> trajectory NPZ using SAM2 + Depth Anything")
     sam_extract.add_argument("source")
-    sam_extract.add_argument("--seed", nargs=3, action="append", required=True,
+    sam_extract_seed = sam_extract.add_mutually_exclusive_group(required=True)
+    sam_extract_seed.add_argument("--seed", nargs=3, action="append",
                              metavar=("OBJECT_ID", "X", "Y"),
                              help="Positive first-frame click; repeat for multiple points/objects")
+    sam_extract_seed.add_argument("--auto-seed", action="store_true",
+                                  help="Detect one moving object in a static-camera video")
+    sam_extract.add_argument("--seed-preview", default="auto_seed_preview.jpg",
+                             help="Annotated first frame written when --auto-seed is used")
     sam_extract.add_argument("--negative", nargs=3, action="append",
                              metavar=("OBJECT_ID", "X", "Y"),
                              help="Negative first-frame click; may be repeated")
@@ -100,8 +120,12 @@ def _parser() -> argparse.ArgumentParser:
 
     sam_run = sub.add_parser("run-sam2", help="SAM2 extraction followed by Morpheus scoring")
     sam_run.add_argument("source")
-    sam_run.add_argument("--seed", nargs=3, action="append", required=True,
+    sam_run_seed = sam_run.add_mutually_exclusive_group(required=True)
+    sam_run_seed.add_argument("--seed", nargs=3, action="append",
                          metavar=("OBJECT_ID", "X", "Y"))
+    sam_run_seed.add_argument("--auto-seed", action="store_true",
+                              help="Detect one moving object in a static-camera video")
+    sam_run.add_argument("--seed-preview", default="auto_seed_preview.jpg")
     sam_run.add_argument("--negative", nargs=3, action="append",
                          metavar=("OBJECT_ID", "X", "Y"))
     sam_run.add_argument("--fps", type=float)
@@ -116,6 +140,18 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     args = _parser().parse_args(argv)
+    if args.command == "suggest-seed":
+        result = suggest_moving_object_seed(args.source, preview_path=args.preview)
+        print(json.dumps({
+            "object_id": 1,
+            "x": result.x,
+            "y": result.y,
+            "area": result.area,
+            "confidence": result.confidence,
+            "preview": args.preview,
+        }, indent=2, ensure_ascii=False))
+        return 0
+
     if args.command == "sam2-doctor":
         report = SAM2DepthTrajectoryExtractor(_sam2_config(args)).environment_report()
         print(json.dumps(report, indent=2, ensure_ascii=False))

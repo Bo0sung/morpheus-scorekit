@@ -34,6 +34,24 @@ python scripts/download_validation_sample.py
 
 현재 샘플의 첫 프레임 클릭 좌표는 공식 `labels.json` 기준 `(642.49, 67.32)`입니다.
 
+### PhyCo-Kubric 강체 자유낙하 데이터
+
+Hugging Face 데이터셋 페이지에서 gated access 조건에 먼저 동의한 뒤, 강체 공 하나의
+`ball_drop_v2` 폴더만 다운로드합니다.
+
+```powershell
+$env:PYTHONPATH = ".deps"
+python scripts/download_phyco_ball_drop_v2.py
+```
+
+압축 전체를 풀지 않고 첫 번째 샘플의 RGB·분할·깊이 영상과 메타데이터만 꺼낼 수 있습니다.
+
+```powershell
+python scripts/extract_phyco_sample.py `
+  validation_data/phyco_kubric/ball_drop_v2/2025-09-04.tar.gz `
+  --output validation_data/phyco_sample
+```
+
 ## 1. 영상 -> 궤적
 
 ```powershell
@@ -85,6 +103,68 @@ python -m morpheus_scorekit.cli extract-sam2 `
 `--seed` 형식은 `OBJECT_ID X Y`이고 여러 점이나 물체에는 반복 지정합니다. 배경을
 제외시키는 클릭은 `--negative OBJECT_ID X Y`입니다. 영상 파일과 프레임 폴더를 모두
 받으며, 내부에서 SAM2가 요구하는 `00000.jpg` 구조로 변환합니다.
+
+정적 카메라에서 공 하나가 움직이는 `ball_drop_v2` 영상은 첫 프레임의 움직이는 물체를
+자동으로 찾아 seed를 만들 수 있습니다. `auto_seed_preview.jpg`에서 빨간 점이 공 위에
+있는지 확인해야 합니다. 틀렸다면 `--auto-seed` 대신 `--seed 1 X Y`를 사용합니다.
+
+모델을 실행하기 전에 자동 seed만 빠르게 확인할 수도 있습니다.
+
+```bash
+python -m morpheus_scorekit.cli suggest-seed rgba.mp4 \
+  --preview auto_seed_preview.jpg
+```
+
+```bash
+python -m morpheus_scorekit.cli extract-sam2 rgba.mp4 \
+  --auto-seed --seed-preview outputs/auto_seed_preview.jpg \
+  --experiment falling_ball --device cuda \
+  --output outputs/trajectory.npz \
+  --overlay-dir outputs/tracking_overlay
+```
+
+### SSH 서버에 영상 하나만 올려 실행
+
+로컬 PC에서 RGB 영상 하나만 복사합니다.
+
+```bash
+scp validation_data/phyco_sample/rgba.mp4 USER@HOST:~/morpheus-input/
+```
+
+서버에서 저장소와 모델을 최초 한 번 준비합니다. 현재 GitHub 저장소가 비공개라면 clone
+시에 GitHub 인증이 필요합니다.
+
+```bash
+git clone --recurse-submodules https://github.com/Bo0sung/morpheus-scorekit.git
+cd morpheus-scorekit
+bash scripts/setup_gpu_server.sh
+```
+
+이후에는 영상 경로 하나만 넘기면 자동 seed, SAM2 추적, Depth Anything 깊이 추정을 거쳐
+`trajectory.npz`를 만듭니다.
+
+```bash
+bash scripts/run_single_video.sh \
+  ~/morpheus-input/rgba.mp4 \
+  ~/morpheus-output/rgba
+```
+
+자동 seed가 잘못되면 첫 프레임에서 확인한 `X Y`를 마지막 두 인자로 지정합니다.
+
+```bash
+bash scripts/run_single_video.sh \
+  ~/morpheus-input/rgba.mp4 \
+  ~/morpheus-output/rgba \
+  384 80
+```
+
+결과 중 `trajectory.npz`가 좌표 데이터이고, `tracking_overlay/`는 프레임별 추적 확인용,
+`auto_seed_preview.jpg`는 자동 선택된 최초 클릭점 확인용입니다. 결과 회수는 다음과 같습니다.
+
+```bash
+scp USER@HOST:~/morpheus-output/rgba/trajectory.npz .
+scp -r USER@HOST:~/morpheus-output/rgba/tracking_overlay .
+```
 
 추적과 점수 계산을 한 번에 실행할 수도 있습니다.
 
