@@ -1,0 +1,3 @@
+[submodule "vendor/Morpheus"]
+	path = vendor/Morpheus
+	url = https://github.com/physics-from-video/Morpheus.git

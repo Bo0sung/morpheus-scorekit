@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "morpheus-scorekit"
+version = "0.1.0"
+description = "Separated video-to-trajectory and Morpheus trajectory scoring modules"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy",
+  "scipy",
+  "pandas",
+  "opencv-python",
+  "torch",
+  "matplotlib",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+sam2 = [
+  "pillow",
+  "scikit-image",
+  "transformers",
+  "torchvision",
+  "hydra-core>=1.3",
+]
+
+[project.scripts]
+morpheus-scorekit = "morpheus_scorekit.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

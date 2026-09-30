@@ -1,0 +1,15 @@
+.deps/
+.venv/
+validation_data/
+validation_results/
+tmp/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.pt
+*.pth
+*.ckpt
+nepal_flood_*.png
+build/
+dist/
+*.egg-info/

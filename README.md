@@ -1,0 +1,151 @@
+# Morpheus ScoreKit
+
+논문의 평가 파이프라인을 두 개의 독립 모듈로 나눈 구현입니다.
+
+1. `morpheus_scorekit.extraction`: 영상/프레임에서 프레임 정렬 궤적 추출
+2. `morpheus_scorekit.scoring`: 유효 궤적만 입력받아 Morpheus 점수 계산
+
+점수 모듈은 추적기에 의존하지 않습니다. 좌표 순서는 공식 코드와 동일한
+`[Y(row), X(column), depth]`입니다.
+
+## GPU 서버에서 시작
+
+```bash
+git clone --recurse-submodules https://github.com/Bo0sung/morpheus-scorekit.git
+cd morpheus-scorekit
+bash scripts/setup_gpu_server.sh
+source .venv/bin/activate
+export PYTHONPATH="$PWD/src"
+```
+
+비공개 저장소이므로 서버에서 GitHub 인증이 필요합니다. `--recurse-submodules`를
+빠뜨렸다면 `git submodule update --init --recursive`를 실행합니다. 설치 스크립트는
+SAM2 large 체크포인트 하나만 내려받고 연결 상태까지 검사합니다. 서버에서 CUDA 확장
+컴파일이 불가능한 경우 `SAM2_BUILD_CUDA=0 bash scripts/setup_gpu_server.sh`로 설치합니다.
+
+## 검증 데이터
+
+공식 데이터셋의 실제 자유낙하 영상 하나만 다운로드합니다.
+
+```powershell
+$env:PYTHONPATH = ".deps"
+python scripts/download_validation_sample.py
+```
+
+현재 샘플의 첫 프레임 클릭 좌표는 공식 `labels.json` 기준 `(642.49, 67.32)`입니다.
+
+## 1. 영상 -> 궤적
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m morpheus_scorekit.cli extract `
+  validation_data/real-world-cropped/falling_ball/video_0_fps30/frames_for_tracking `
+  --seed 642.4922 67.3234 `
+  --fps 30 `
+  --experiment falling_ball `
+  --output validation_results/falling_ball/trajectory.npz `
+  --overlay-dir validation_results/falling_ball/tracking_overlay
+```
+
+기본 추출기는 정적 카메라의 통제 실험을 빠르게 검증하기 위한 HSV 기반 추적기입니다.
+
+### 논문 방식: SAM2 + Depth Anything
+
+Windows에서는 코드 의존성을 한 번 설치한 뒤 연결 상태를 확인합니다. 상태 확인 명령은
+모델을 내려받거나 로드하지 않습니다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/setup_sam2_windows.ps1
+```
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m morpheus_scorekit.cli sam2-doctor
+```
+
+`checkpoint_exists`, `config_exists`, `vendored_sam2_exists`, 필요한 Python 모듈이
+모두 준비되면 `ready: true`가 됩니다. 기본 체크포인트 위치는
+`vendor/Morpheus/checkpoints/sam2.1_hiera_large.pt`입니다. 다른 파일은
+`--checkpoint D:/models/sam2.1_hiera_large.pt`로 연결할 수 있습니다. Depth Anything은
+기본적으로 `nielsr/depth-anything-large`를 처음 실행할 때 Hugging Face에서 로드하며,
+로컬 모델 폴더는 `--depth-model D:/models/depth-anything-large`로 지정합니다.
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m morpheus_scorekit.cli extract-sam2 `
+  validation_data/real-world-cropped/falling_ball/video_0_fps30/frames_for_tracking `
+  --seed 1 642.4922 67.3234 `
+  --fps 30 `
+  --experiment falling_ball `
+  --checkpoint D:/models/sam2.1_hiera_large.pt `
+  --output validation_results/falling_ball/sam2_trajectory.npz `
+  --overlay-dir validation_results/falling_ball/sam2_overlay
+```
+
+`--seed` 형식은 `OBJECT_ID X Y`이고 여러 점이나 물체에는 반복 지정합니다. 배경을
+제외시키는 클릭은 `--negative OBJECT_ID X Y`입니다. 영상 파일과 프레임 폴더를 모두
+받으며, 내부에서 SAM2가 요구하는 `00000.jpg` 구조로 변환합니다.
+
+추적과 점수 계산을 한 번에 실행할 수도 있습니다.
+
+```powershell
+python -m morpheus_scorekit.cli run-sam2 `
+  validation_data/real-world-cropped/falling_ball/video_0_fps30/frames_for_tracking `
+  --seed 1 642.4922 67.3234 `
+  --fps 30 --experiment falling_ball `
+  --output-dir validation_results/falling_ball/sam2_run `
+  --epochs 200000
+```
+
+Depth Anything 없이 2D 추적만 확인하려면 `--no-depth`를 붙입니다. 이때 depth 열은
+0으로 저장됩니다. 현재 논문의 물리 점수는 이미지 평면 궤적을 사용하므로 점수 실행은
+가능하지만, 논문과 같은 전체 추출 파이프라인 검증에는 depth를 켜는 편이 맞습니다.
+
+## 2. 궤적 -> 점수
+
+빠른 검증:
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m morpheus_scorekit.cli score `
+  validation_results/falling_ball/trajectory.npz `
+  --experiment falling_ball `
+  --output-dir validation_results/falling_ball/scores `
+  --epochs 10000
+```
+
+논문 설정 재현은 `--epochs 200000`을 사용합니다. 출력의 이름은 공식 코드에 맞춥니다.
+
+- `physical_score`: 논문의 Physical Invariance Score
+- `statistical_score`: 논문의 Dynamical Score
+- `total_score`: 두 점수의 산술평균
+
+## 한 번에 실행
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m morpheus_scorekit.cli run `
+  validation_data/real-world-cropped/falling_ball/video_0_fps30/frames_for_tracking `
+  --seed 642.4922 67.3234 `
+  --fps 30 `
+  --experiment falling_ball `
+  --output-dir validation_results/falling_ball `
+  --epochs 10000
+```
+
+공식 라벨 좌표까지 자동으로 읽는 검증 스크립트도 제공합니다.
+
+```powershell
+$env:PYTHONPATH = "src"
+python scripts/validate_real_video.py --epochs 10000
+```
+
+검증 결과는 `validation_results/falling_ball/validation_summary.json`과
+`scores/combined_scores.json`에 저장됩니다.
+
+## 주의
+
+- 물리 현상 이름은 반드시 알려줘야 합니다. 현상마다 ODE와 불변량이 다릅니다.
+- 실제 영상은 `real_world_trajectories`, 생성 영상은 CLI의 `--generated`를 사용합니다.
+- 실제 영상 점수는 경험적인 상한 기준이며, 최종 점수를 실제 점수로 나눠 정규화하지 않습니다.
+- 경량 색상 추적은 자유낙하 검증용입니다. 다물체·외형 변화·가림이 있는 일반 영상에는 SAM2를 사용해야 합니다.
