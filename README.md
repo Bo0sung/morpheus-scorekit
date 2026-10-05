@@ -36,12 +36,31 @@ python scripts/download_validation_sample.py
 
 ### PhyCo-Kubric 강체 자유낙하 데이터
 
-Hugging Face 데이터셋 페이지에서 gated access 조건에 먼저 동의한 뒤, 강체 공 하나의
-`ball_drop_v2` 폴더만 다운로드합니다.
+다운로드 위치는 Hugging Face의
+[`nnsriram97/phyco_kubric`](https://huggingface.co/datasets/nnsriram97/phyco_kubric)입니다.
+강체 공 하나가 플랫폼으로 낙하하고 튀는 데이터는 `ball_drop_v2`이며, 압축 크기는 약
+1.3GB입니다. 데이터셋 페이지에서 gated access 조건(연락처 정보 공유)에 먼저 동의한 뒤
+로그인합니다.
+
+```powershell
+pip install -U huggingface_hub
+hf auth login
+```
+
+그다음 `ball_drop_v2` 폴더만 다운로드합니다.
 
 ```powershell
 $env:PYTHONPATH = ".deps"
 python scripts/download_phyco_ball_drop_v2.py
+```
+
+스크립트를 쓰지 않을 경우 동일한 명령은 다음과 같습니다.
+
+```powershell
+hf download nnsriram97/phyco_kubric `
+  --repo-type dataset `
+  --include "ball_drop_v2/*" `
+  --local-dir validation_data/phyco_kubric
 ```
 
 압축 전체를 풀지 않고 첫 번째 샘플의 RGB·분할·깊이 영상과 메타데이터만 꺼낼 수 있습니다.
@@ -51,6 +70,17 @@ python scripts/extract_phyco_sample.py `
   validation_data/phyco_kubric/ball_drop_v2/2025-09-04.tar.gz `
   --output validation_data/phyco_sample
 ```
+
+샘플에는 `rgba.mp4`, `segmentation.mp4`, `depth.mp4`, `metadata.json`,
+`animation_data.pkl`이 들어 있습니다. `animation_data.pkl`의 프레임별 world-space 위치·회전은
+trajectory predictor의 GT로 쓸 수 있고, RGB에서 추출한 SAM2 궤적의 정확도 검증에도 쓸 수
+있습니다. Pickle은 임의 코드를 실행할 수 있으므로 반드시 공식 데이터셋에서 받은 파일만
+로드해야 합니다.
+
+공식 PhyCo 분포와 렌더링 방식을 그대로 재생성하려면 저자들의
+[`nnsriram97/phyco-sim`](https://github.com/nnsriram97/phyco-sim)을 사용합니다. 반면
+Morpheus의 정상/물리위반 점수 민감도를 실험하려면 별도의
+`kubric-physics-dataset` 정상/위반 쌍 생성기를 사용합니다.
 
 ## 1. 영상 -> 궤적
 
