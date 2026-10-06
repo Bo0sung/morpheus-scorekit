@@ -18,6 +18,20 @@ source .venv/bin/activate
 export PYTHONPATH="$PWD/src"
 ```
 
+이미 서버에 clone한 저장소를 갱신할 때는 다음 순서를 사용합니다.
+
+```bash
+cd ~/morpheus-scorekit
+git pull --ff-only
+git submodule update --init --recursive
+source .venv/bin/activate
+python -m pip install -e ".[sam2]"
+export PYTHONPATH="$PWD/src"
+python -m morpheus_scorekit.cli run-sam2 -h | grep -- --auto-seed
+```
+
+마지막 명령에서 `--auto-seed`가 보여야 현재 CLI입니다.
+
 비공개 저장소이므로 서버에서 GitHub 인증이 필요합니다. `--recurse-submodules`를
 빠뜨렸다면 `git submodule update --init --recursive`를 실행합니다. 설치 스크립트는
 SAM2 large 체크포인트 하나만 내려받고 연결 상태까지 검사합니다. 서버에서 CUDA 확장
@@ -229,6 +243,28 @@ python -m morpheus_scorekit.cli score `
 - `physical_score`: 논문의 Physical Invariance Score
 - `statistical_score`: 논문의 Dynamical Score
 - `total_score`: 두 점수의 산술평균
+
+## Kubric normal/violation pair 전체 실행
+
+최신 `kubric-physics-dataset`이 만든 pair에는 Morpheus 호환
+`trajectory_freefall_gt.npz`가 포함됩니다. 두 저장소가 같은 상위 폴더에 있을 때 아래 한
+명령으로 normal/violation의 GT 점수, 자유낙하 프레임 분리, SAM2 trajectory 추출 및 영상
+점수를 모두 실행합니다.
+
+```bash
+cd ~/morpheus-scorekit
+source .venv/bin/activate
+export PYTHONPATH="$PWD/src"
+
+EPOCHS=10000 DEVICE=cuda bash scripts/run_kubric_pair.sh \
+  ~/kubric-physics-dataset/outputs/scene_000001
+```
+
+결과는 pair 폴더의 `morpheus/` 아래에 저장됩니다.
+
+- `normal_gt/combined_scores.json`, `violation_gt/combined_scores.json`
+- `normal_video/trajectory.npz`, `violation_video/trajectory.npz`
+- `normal_video/scores/combined_scores.json`, `violation_video/scores/combined_scores.json`
 
 ## 한 번에 실행
 
