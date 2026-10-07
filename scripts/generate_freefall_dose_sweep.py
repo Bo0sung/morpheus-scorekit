@@ -18,6 +18,11 @@ def main() -> int:
     parser.add_argument("--start-frame", type=int, default=8)
     parser.add_argument("--end-frame", type=int, default=20)
     parser.add_argument("--manifest", type=Path)
+    parser.add_argument(
+        "--render",
+        action="store_true",
+        help="Render RGB/depth output. Default is fast CPU state-only generation.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -34,6 +39,10 @@ def main() -> int:
         end_frame=args.end_frame,
     )
     manifest_path = args.manifest or repo / "outputs" / "freefall_sweep_manifest.json"
+    manifest["generation"] = {
+        "state_only": not args.render,
+        "render_requested": bool(args.render),
+    }
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
@@ -57,10 +66,14 @@ def main() -> int:
             str(pair["dose"]),
         ]
         if args.dry_run:
-            print(f"{prefix}: {' '.join(command)}")
+            mode = "render" if args.render else "state-only CPU"
+            print(f"{prefix} [{mode}]: {' '.join(command)}")
         else:
-            print(f"{prefix}: generating")
-            subprocess.run(command, cwd=repo, env=os.environ.copy(), check=True)
+            child_env = os.environ.copy()
+            if not args.render:
+                child_env.update({"NO_RENDER": "1", "USE_GPU": "0", "RENDER_DEVICE": "CPU"})
+            print(f"{prefix}: generating ({'render' if args.render else 'state-only CPU'})")
+            subprocess.run(command, cwd=repo, env=child_env, check=True)
 
     print(f"Manifest: {manifest_path}")
     return 0

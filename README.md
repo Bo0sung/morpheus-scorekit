@@ -309,22 +309,31 @@ PYTHONPATH=src python scripts/classify_freefall_state.py \
 
 ## 자유낙하 gravity dose sweep
 
-여러 seed에서 `gravity_scale=0.9, 0.7, 0.5, 0.2, 0.0` pair를 자동 생성하려면 GPU 서버에서
-다음을 실행합니다. `kubric-physics-dataset`의 기존 Docker 생성기를 순차 호출하며, 완료된
-pair는 재실행 시 건너뜁니다.
+여러 seed에서 `gravity_scale=0.9, 0.7, 0.5, 0.2, 0.0` pair를 자동 생성하려면 서버에서
+다음을 실행합니다. classifier 검증에는 `state.npz`만 필요하므로 기본 모드는 Blender 렌더와
+NVIDIA runtime을 사용하지 않는 CPU state-only 생성입니다. 따라서 rootless Docker의 GPU
+cgroup 권한이 없어도 동작합니다. 완료된 pair는 재실행 시 건너뜁니다.
 
 ```bash
 cd ~/morpheus-scorekit
 source .venv/bin/activate
 export PYTHONPATH="$PWD/src"
 
-GPU_ID=0 python scripts/generate_freefall_dose_sweep.py \
+python scripts/generate_freefall_dose_sweep.py \
   ~/kubric-physics-dataset \
   --count 20 \
   --start-seed 1000 \
   --doses 0.9 0.7 0.5 0.2 0.0 \
   --start-frame 8 \
   --end-frame 20
+```
+
+RGB·depth·segmentation 영상까지 필요한 경우에만 `--render`와 `GPU_ID`를 지정합니다. 이때
+rootless Docker에서 NVIDIA Container Toolkit이 사용 가능하도록 서버가 구성되어 있어야 합니다.
+
+```bash
+GPU_ID=0 python scripts/generate_freefall_dose_sweep.py \
+  ~/kubric-physics-dataset --count 1 --render
 ```
 
 생성된 모든 pair를 검증하고 dose-response 보고서·JSON·CSV를 만들려면 다음을 실행합니다.
