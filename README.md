@@ -307,6 +307,44 @@ PYTHONPATH=src python scripts/classify_freefall_state.py \
 기본 residual 임계값 `0.15`는 동작 확인을 위한 임시값입니다. 실제 실험에서는 정상 validation
 데이터의 residual 분포로 이 값을 보정해야 합니다.
 
+## 자유낙하 gravity dose sweep
+
+여러 seed에서 `gravity_scale=0.9, 0.7, 0.5, 0.2, 0.0` pair를 자동 생성하려면 GPU 서버에서
+다음을 실행합니다. `kubric-physics-dataset`의 기존 Docker 생성기를 순차 호출하며, 완료된
+pair는 재실행 시 건너뜁니다.
+
+```bash
+cd ~/morpheus-scorekit
+source .venv/bin/activate
+export PYTHONPATH="$PWD/src"
+
+GPU_ID=0 python scripts/generate_freefall_dose_sweep.py \
+  ~/kubric-physics-dataset \
+  --count 20 \
+  --start-seed 1000 \
+  --doses 0.9 0.7 0.5 0.2 0.0 \
+  --start-frame 8 \
+  --end-frame 20
+```
+
+생성된 모든 pair를 검증하고 dose-response 보고서·JSON·CSV를 만들려면 다음을 실행합니다.
+
+```bash
+python scripts/validate_freefall_dose_sweep.py \
+  ~/kubric-physics-dataset/outputs/freefall_sweep_manifest.json
+```
+
+결과는 `~/kubric-physics-dataset/outputs/freefall_sweep_report/`에 저장됩니다.
+
+- `report.md`: 정확도, F1, 오탐률, dose-response 상관, 배율별 평균 결과
+- `sweep_results.json`: 전체 집계 결과
+- `per_video_results.csv`: 각 normal/violation 영상의 판정과 peak 구간
+
+검증 코드는 개입 프레임을 classifier 입력으로 사용하지 않습니다. 생성 manifest의 개입 구간은
+판정 후 localization IoU를 계산할 때만 사용합니다. 자동 임계값은 정상 GT residual의 중앙값,
+MAD, 99 percentile로 계산하며 최소값은 `0.02`입니다. 최종 논문 실험에서는 threshold 보정용
+seed와 test seed를 별도로 분리해야 합니다.
+
 ## 한 번에 실행
 
 ```powershell

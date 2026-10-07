@@ -126,6 +126,7 @@ def scan_freefall_acceleration(
     top_count = max(1, int(np.ceil(len(residuals) * top_fraction)))
     top_indices = np.argsort(residuals)[-top_count:]
     top_mean = float(np.mean(residuals[top_indices]))
+    physics_score = float(np.exp(-top_mean))
     peak_index = int(np.argmax(residuals))
     abnormal_indices = np.flatnonzero(residuals >= residual_threshold)
 
@@ -141,6 +142,8 @@ def scan_freefall_acceleration(
     return {
         "classification": "violation" if top_mean >= residual_threshold else "normal",
         "decision_value": top_mean,
+        "freefall_physics_score": physics_score,
+        "freefall_violation_score": 1.0 - physics_score,
         "decision_rule": "top-window mean normalized gravity residual >= threshold",
         "residual_threshold": float(residual_threshold),
         "expected_gravity_m_s2": float(expected_gravity),
@@ -414,6 +417,8 @@ def render_pair_markdown(result: dict[str, Any]) -> str:
             f"{violation_classifier['classification']} |",
             f"| 판정값 | {normal_classifier['decision_value']:.6f} | "
             f"{violation_classifier['decision_value']:.6f} |",
+            f"| 자유낙하 물리 점수 | {normal_classifier['freefall_physics_score']:.6f} | "
+            f"{violation_classifier['freefall_physics_score']:.6f} |",
             f"| 최대 중력 residual | "
             f"{normal_classifier['max_normalized_gravity_residual']:.6f} | "
             f"{violation_classifier['max_normalized_gravity_residual']:.6f} |",

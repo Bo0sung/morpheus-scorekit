@@ -72,6 +72,11 @@ def test_sliding_window_classifier_estimates_acceleration_without_event_metadata
     assert normal_result["max_normalized_gravity_residual"] < 1e-8
     assert violation_result["classification"] == "violation"
     assert violation_result["max_normalized_gravity_residual"] > 0.49
+    expected_score = np.exp(-violation_result["decision_value"])
+    assert abs(violation_result["freefall_physics_score"] - expected_score) < 1e-12
+    assert abs(
+        violation_result["freefall_violation_score"] - (1.0 - expected_score)
+    ) < 1e-12
     peak = violation_result["peak_window"]
     assert 12 <= peak["start_frame"] <= 18
     assert 12 <= peak["end_frame_inclusive"] <= 19
