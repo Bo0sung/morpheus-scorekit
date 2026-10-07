@@ -294,6 +294,19 @@ PYTHONPATH=src python scripts/compare_freefall_pair.py \
   ~/kubric-physics-dataset/outputs/scene_000001
 ```
 
+개입 프레임을 모르는 `state.npz` 하나를 자동 판정하려면 다음을 실행합니다. 각 5프레임
+구간의 world-space 위치에 2차식을 fitting하여 가속도를 추정하므로, 저장된 acceleration
+배열이나 intervention metadata를 사용하지 않습니다.
+
+```bash
+PYTHONPATH=src python scripts/classify_freefall_state.py \
+  ~/kubric-physics-dataset/outputs/scene_000001/violation/state.npz \
+  --output violation_classifier.json
+```
+
+기본 residual 임계값 `0.15`는 동작 확인을 위한 임시값입니다. 실제 실험에서는 정상 validation
+데이터의 residual 분포로 이 값을 보정해야 합니다.
+
 ## 한 번에 실행
 
 ```powershell

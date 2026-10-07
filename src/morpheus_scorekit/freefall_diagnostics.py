@@ -67,6 +67,99 @@ def _quadratic_gravity(time: np.ndarray, height: np.ndarray) -> tuple[float, flo
     return float(coefficients[2]), rmse / travel
 
 
+def scan_freefall_acceleration(
+    state: dict[str, np.ndarray],
+    *,
+    expected_gravity: float = EARTH_GRAVITY,
+    window_size: int = 5,
+    residual_threshold: float = 0.15,
+    top_fraction: float = 0.2,
+    end_frame_exclusive: int | None = None,
+) -> dict[str, Any]:
+    """Automatically find anomalous acceleration without a known event window.
+
+    Acceleration is estimated from position, not read from the state's acceleration
+    array.  A quadratic ``z(t)`` is fitted in every overlapping window and its second
+    derivative is compared with the expected gravity in metric units.
+    """
+
+    if window_size < 3 or window_size % 2 == 0:
+        raise ValueError("window_size must be an odd integer of at least 3")
+    if residual_threshold <= 0:
+        raise ValueError("residual_threshold must be positive")
+    if not 0 < top_fraction <= 1:
+        raise ValueError("top_fraction must be in (0, 1]")
+    if expected_gravity == 0:
+        raise ValueError("expected_gravity must be non-zero")
+
+    frames = np.asarray(state["frame"], dtype=int)
+    time = np.asarray(state["time"], dtype=float)
+    height = np.asarray(state["position"], dtype=float)[:, 2]
+    contact_end = _first_contact_exclusive(state["contact_ball_floor"])
+    end = contact_end if end_frame_exclusive is None else min(contact_end, end_frame_exclusive)
+    if end < window_size:
+        raise ValueError(f"fewer than {window_size} pre-contact frames remain")
+
+    windows: list[dict[str, Any]] = []
+    for start in range(0, end - window_size + 1):
+        stop = start + window_size
+        segment_time = time[start:stop]
+        segment_height = height[start:stop]
+        if not np.isfinite(segment_time).all() or not np.isfinite(segment_height).all():
+            continue
+        fitted_acceleration, fit_nrmse = _quadratic_gravity(segment_time, segment_height)
+        residual = abs(fitted_acceleration - expected_gravity) / abs(expected_gravity)
+        windows.append(
+            {
+                "start_frame": int(frames[start]),
+                "end_frame_inclusive": int(frames[stop - 1]),
+                "center_frame": int(frames[start + window_size // 2]),
+                "estimated_acceleration_m_s2": fitted_acceleration,
+                "normalized_gravity_residual": float(residual),
+                "quadratic_fit_nrmse": fit_nrmse,
+            }
+        )
+    if not windows:
+        raise ValueError("no finite sliding windows are available")
+
+    residuals = np.asarray([window["normalized_gravity_residual"] for window in windows])
+    top_count = max(1, int(np.ceil(len(residuals) * top_fraction)))
+    top_indices = np.argsort(residuals)[-top_count:]
+    top_mean = float(np.mean(residuals[top_indices]))
+    peak_index = int(np.argmax(residuals))
+    abnormal_indices = np.flatnonzero(residuals >= residual_threshold)
+
+    detected_range = None
+    if len(abnormal_indices):
+        detected_range = {
+            "start_frame": int(windows[int(abnormal_indices[0])]["start_frame"]),
+            "end_frame_inclusive": int(
+                windows[int(abnormal_indices[-1])]["end_frame_inclusive"]
+            ),
+        }
+
+    return {
+        "classification": "violation" if top_mean >= residual_threshold else "normal",
+        "decision_value": top_mean,
+        "decision_rule": "top-window mean normalized gravity residual >= threshold",
+        "residual_threshold": float(residual_threshold),
+        "expected_gravity_m_s2": float(expected_gravity),
+        "window_size_frames": int(window_size),
+        "top_fraction": float(top_fraction),
+        "window_count": len(windows),
+        "max_normalized_gravity_residual": float(residuals[peak_index]),
+        "mean_normalized_gravity_residual": float(np.mean(residuals)),
+        "abnormal_window_fraction": float(len(abnormal_indices) / len(windows)),
+        "peak_window": windows[peak_index],
+        "detected_range": detected_range,
+        "windows": windows,
+        "notes": [
+            "No intervention frames or acceleration array were used.",
+            "The default threshold is provisional and must be calibrated on normal validation data.",
+        ],
+    }
+
+
 def analyze_freefall_state(
     state: dict[str, np.ndarray],
     *,
@@ -179,6 +272,8 @@ def compare_freefall_pair(
     *,
     score_root: str | Path | None = None,
     expected_gravity: float = EARTH_GRAVITY,
+    classifier_window_size: int = 5,
+    classifier_threshold: float = 0.15,
 ) -> dict[str, Any]:
     pair_dir = Path(pair_dir)
     normal_state = load_freefall_state(pair_dir / "normal" / "state.npz")
@@ -209,6 +304,20 @@ def compare_freefall_pair(
         expected_gravity=expected_gravity,
         end_frame_exclusive=common_end,
         event_window=event_window,
+    )
+    normal_classifier = scan_freefall_acceleration(
+        normal_state,
+        expected_gravity=expected_gravity,
+        window_size=classifier_window_size,
+        residual_threshold=classifier_threshold,
+        end_frame_exclusive=common_end,
+    )
+    violation_classifier = scan_freefall_acceleration(
+        violation_state,
+        expected_gravity=expected_gravity,
+        window_size=classifier_window_size,
+        residual_threshold=classifier_threshold,
+        end_frame_exclusive=common_end,
     )
 
     score_root = Path(score_root) if score_root is not None else pair_dir / "morpheus"
@@ -241,6 +350,12 @@ def compare_freefall_pair(
             "normal": normal_common,
             "violation": violation_common,
             "violation_minus_normal": _numeric_delta(normal_common, violation_common),
+        },
+        "automatic_acceleration_classifier": {
+            "uses_known_intervention_window": False,
+            "uses_saved_acceleration_array": False,
+            "normal": normal_classifier,
+            "violation": violation_classifier,
         },
         "original_morpheus": {
             "available": normal_score is not None and violation_score is not None,
@@ -281,6 +396,37 @@ def render_pair_markdown(result: dict[str, Any]) -> str:
     for key, label in metric_labels:
         delta = float(violation[key]) - float(normal[key])
         lines.append(f"| {label} | {normal[key]:.6f} | {violation[key]:.6f} | {delta:+.6f} |")
+
+    classifier = result["automatic_acceleration_classifier"]
+    normal_classifier = classifier["normal"]
+    violation_classifier = classifier["violation"]
+    lines.extend(
+        [
+            "",
+            "## 자동 가속도 classifier",
+            "",
+            "개입 프레임과 저장된 가속도를 사용하지 않고, 각 구간의 world-space 위치를 "
+            "포물선 fitting하여 가속도를 추정했습니다.",
+            "",
+            "| 지표 | normal | violation |",
+            "|---|---:|---:|",
+            f"| 판정 | {normal_classifier['classification']} | "
+            f"{violation_classifier['classification']} |",
+            f"| 판정값 | {normal_classifier['decision_value']:.6f} | "
+            f"{violation_classifier['decision_value']:.6f} |",
+            f"| 최대 중력 residual | "
+            f"{normal_classifier['max_normalized_gravity_residual']:.6f} | "
+            f"{violation_classifier['max_normalized_gravity_residual']:.6f} |",
+            f"| peak 추정 가속도 (m/s²) | "
+            f"{normal_classifier['peak_window']['estimated_acceleration_m_s2']:.6f} | "
+            f"{violation_classifier['peak_window']['estimated_acceleration_m_s2']:.6f} |",
+            f"| peak window | "
+            f"{normal_classifier['peak_window']['start_frame']}~"
+            f"{normal_classifier['peak_window']['end_frame_inclusive']} | "
+            f"{violation_classifier['peak_window']['start_frame']}~"
+            f"{violation_classifier['peak_window']['end_frame_inclusive']} |",
+        ]
+    )
 
     if "event_window" in normal and "event_window" in violation:
         normal_event = normal["event_window"]
@@ -340,6 +486,8 @@ def render_pair_markdown(result: dict[str, Any]) -> str:
             "## 해석",
             "",
             "- `gravity_agreement_diagnostic`은 `exp(-MAE/|g|)`이며 이 실험용 보조 지표입니다.",
+            "- 자동 classifier는 개입 구간을 입력받지 않고 위치 궤적에서 가속도를 직접 추정합니다.",
+            "- classifier의 기본 임계값은 임시값이며 정상 validation 데이터로 보정해야 합니다.",
             "- 공통 구간은 낙하시간 차이를 지우지 않도록 초 단위 시간을 그대로 유지합니다.",
             "- 개입 구간 결과가 전체 구간보다 크게 벌어지면, 전체 평균이 위반 신호를 희석했다는 증거입니다.",
             "- 최종 보고에서는 원본 Morpheus와 이 진단값을 함께 제시해야 합니다.",

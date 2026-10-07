@@ -6,6 +6,7 @@ from morpheus_scorekit.freefall_diagnostics import (
     analyze_freefall_state,
     compare_freefall_pair,
     render_pair_markdown,
+    scan_freefall_acceleration,
 )
 
 
@@ -58,6 +59,25 @@ def test_event_window_exposes_temporary_gravity_change():
     ]
 
 
+def test_sliding_window_classifier_estimates_acceleration_without_event_metadata():
+    normal = _state([-9.81] * 30)
+    violation_g = np.full(30, -9.81)
+    violation_g[12:19] = -4.905
+    violation = _state(violation_g)
+
+    normal_result = scan_freefall_acceleration(normal, window_size=5)
+    violation_result = scan_freefall_acceleration(violation, window_size=5)
+
+    assert normal_result["classification"] == "normal"
+    assert normal_result["max_normalized_gravity_residual"] < 1e-8
+    assert violation_result["classification"] == "violation"
+    assert violation_result["max_normalized_gravity_residual"] > 0.49
+    peak = violation_result["peak_window"]
+    assert 12 <= peak["start_frame"] <= 18
+    assert 12 <= peak["end_frame_inclusive"] <= 19
+    assert abs(peak["estimated_acceleration_m_s2"] + 4.905) < 1e-8
+
+
 def test_pair_report_uses_common_horizon_and_loads_original_scores(tmp_path):
     normal = _state([-9.81] * 30)
     violation_g = np.full(30, -9.81)
@@ -103,4 +123,10 @@ def test_pair_report_uses_common_horizon_and_loads_original_scores(tmp_path):
     assert result["world_space_common_horizon"]["normal"]["frame_count"] == 23
     assert result["world_space_common_horizon"]["violation"]["frame_count"] == 23
     assert result["original_morpheus"]["available"]
+    assert result["automatic_acceleration_classifier"]["normal"]["classification"] == "normal"
+    assert (
+        result["automatic_acceleration_classifier"]["violation"]["classification"]
+        == "violation"
+    )
+    assert "자동 가속도 classifier" in render_pair_markdown(result)
     assert "개입 프레임만 본 결과" in render_pair_markdown(result)

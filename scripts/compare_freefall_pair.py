@@ -23,12 +23,18 @@ def main() -> int:
         help="Default: PAIR_DIR/morpheus/freefall_diagnostics",
     )
     parser.add_argument("--gravity", type=float, default=-9.81)
+    parser.add_argument("--window-size", type=int, default=5)
+    parser.add_argument("--residual-threshold", type=float, default=0.15)
     args = parser.parse_args()
 
     output_dir = args.output_dir or args.pair_dir / "morpheus" / "freefall_diagnostics"
     output_dir.mkdir(parents=True, exist_ok=True)
     result = compare_freefall_pair(
-        args.pair_dir, score_root=args.score_root, expected_gravity=args.gravity
+        args.pair_dir,
+        score_root=args.score_root,
+        expected_gravity=args.gravity,
+        classifier_window_size=args.window_size,
+        classifier_threshold=args.residual_threshold,
     )
     json_path = output_dir / "diagnostics.json"
     report_path = output_dir / "report.md"
