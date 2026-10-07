@@ -28,6 +28,11 @@ for split in normal violation; do
     --epochs "$EPOCHS"
 done
 
+"$PYTHON_BIN" "$ROOT/scripts/compare_freefall_pair.py" \
+  "$PAIR_DIR" \
+  --score-root "$OUTPUT_DIR" \
+  --output-dir "$OUTPUT_DIR/freefall_diagnostics"
+
 "$PYTHON_BIN" "$ROOT/scripts/prepare_kubric_freefall_frames.py" \
   "$PAIR_DIR" "$OUTPUT_DIR/freefall_frames"
 
@@ -46,3 +51,4 @@ done
 
 echo "GT scores:    $OUTPUT_DIR/normal_gt and $OUTPUT_DIR/violation_gt"
 echo "Video scores: $OUTPUT_DIR/normal_video and $OUTPUT_DIR/violation_video"
+echo "Diagnostics:  $OUTPUT_DIR/freefall_diagnostics/report.md"

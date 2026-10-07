@@ -91,6 +91,21 @@ trajectory predictor의 GT로 쓸 수 있고, RGB에서 추출한 SAM2 궤적의
 있습니다. Pickle은 임의 코드를 실행할 수 있으므로 반드시 공식 데이터셋에서 받은 파일만
 로드해야 합니다.
 
+추출한 `ball_drop_v2` 샘플의 RGB에서 공을 추적하고, 첫 바닥 접촉 전 자유낙하 구간만 잘라
+Morpheus 점수를 계산하려면 다음을 실행합니다.
+
+```bash
+EPOCHS=10000 DEVICE=cuda bash scripts/run_phyco_sample.sh \
+  validation_data/phyco_sample
+```
+
+결과는 `validation_data/phyco_sample/morpheus/scores/combined_scores.json`에 저장됩니다. 이
+영상 기반 접촉 프레임은 첫 최저점으로 추정하므로 정적 카메라를 가정합니다. 연구 결과에는
+`animation_data.pkl`의 world-space 궤적으로 접촉 시점을 교차 검증해야 합니다. PhyCo 영상은
+정상 물리 분포를 측정하는 대조군이며, 물리법칙 위반 민감도는 별도의 Kubric normal/violation
+matched pair로 측정합니다. 구체적인 비교 설계는
+[`docs/freefall_score_gap_experiment.md`](docs/freefall_score_gap_experiment.md)에 정리했습니다.
+
 공식 PhyCo 분포와 렌더링 방식을 그대로 재생성하려면 저자들의
 [`nnsriram97/phyco-sim`](https://github.com/nnsriram97/phyco-sim)을 사용합니다. 반면
 Morpheus의 정상/물리위반 점수 민감도를 실험하려면 별도의
@@ -263,8 +278,21 @@ EPOCHS=10000 DEVICE=cuda bash scripts/run_kubric_pair.sh \
 결과는 pair 폴더의 `morpheus/` 아래에 저장됩니다.
 
 - `normal_gt/combined_scores.json`, `violation_gt/combined_scores.json`
+- `freefall_diagnostics/report.md`: 실제 시간·월드 좌표·동일 프레임 구간 비교
+- `freefall_diagnostics/diagnostics.json`: 전체/개입 구간의 수치 결과
 - `normal_video/trajectory.npz`, `violation_video/trajectory.npz`
 - `normal_video/scores/combined_scores.json`, `violation_video/scores/combined_scores.json`
+
+`freefall_diagnostics`는 Morpheus 점수를 대체하지 않습니다. `state.npz`의 초 단위 시간과
+world-space z 좌표를 사용해 정상 중력과의 가속도 오차를 계산하고, normal/violation의 공통
+pre-contact 프레임과 개입 프레임을 별도로 비교합니다. 따라서 원본 점수의 평균·시간 정규화로
+위반 신호가 얼마나 희석됐는지 함께 제시할 수 있습니다. 이미 GT 점수를 계산했다면 진단만
+다시 실행할 수도 있습니다.
+
+```bash
+PYTHONPATH=src python scripts/compare_freefall_pair.py \
+  ~/kubric-physics-dataset/outputs/scene_000001
+```
 
 ## 한 번에 실행
 
